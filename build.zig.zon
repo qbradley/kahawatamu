@@ -1,0 +1,15 @@
+.{
+	.name = "kahawatamu",
+	.version = "0.0.1",
+
+	.dependencies = .{
+		.zap = .{
+			.url = "https://github.com/qbradley/zap/archive/631ee2a02609bb8c721682dbc7f8248ecca27874.tar.gz",
+			.hash = "1220480753126239aa73ab9e8fb13501b50f696ebf74bb70f68da82f869f2108ff69",
+		},
+		.@"facil.io" = .{
+			.url = "https://github.com/qbradley/facil.io/archive/f5a5a0fa28950f78d0bae251e146ae7a6b0ab869.tar.gz",
+			.hash = "1220c0ce15fbedd7b5fb3de54f467473585ef5ba9b2db0c37e547a5c1ebc9ce80372",
+		}
+	},
+}
