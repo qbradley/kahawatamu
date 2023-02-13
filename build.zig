@@ -4,15 +4,7 @@ const std = @import("std");
 // declaratively construct a build graph that will be executed by an external
 // runner.
 pub fn build(b: *std.Build) void {
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
-
-    // Standard optimization options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
-    // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
     const zap = b.dependency("zap", .{
@@ -27,8 +19,6 @@ pub fn build(b: *std.Build) void {
 
     const exe = b.addExecutable(.{
         .name = "kahawatamu",
-        // In this case the main source file is merely a path, however, in more
-        // complicated build scripts, this could be a generated file.
         .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
         .optimize = optimize,
@@ -36,11 +26,9 @@ pub fn build(b: *std.Build) void {
 
     exe.linkLibrary(facil.artifact("facil.io"));
     exe.addModule("zap", zap.module("zap"));
+    exe.addIncludePath("src/sqlite");
+    exe.addCSourceFile("src/sqlite/sqlite3.c", &.{});
     exe.linkLibC();
-
-    // This declares intent for the executable to be installed into the
-    // standard location when the user invokes the "install" step (the default
-    // step when running `zig build`).
     exe.install();
 
     // This *creates* a RunStep in the build graph, to be executed when another
