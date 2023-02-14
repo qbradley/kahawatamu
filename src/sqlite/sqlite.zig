@@ -117,6 +117,8 @@ pub fn prepare(self: *Database, sql: []const u8) Error!Statement {
     var stmt: ?*c.sqlite3_stmt = undefined;
     const rc: c_int = c.sqlite3_prepare_v2(self.db, sql.ptr, @intCast(c_int, sql.len), &stmt, null);
     if (rc != 0) {
+        const text = c.sqlite3_errstr(rc);
+        std.debug.print("SQLITE ERROR: {} {s}\n", .{ rc, std.mem.sliceTo(text, 0) });
         return error.Failed;
     }
     return .{
