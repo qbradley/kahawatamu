@@ -46,7 +46,7 @@ fn bad_request(comptime format: []const u8, args: anytype) !Response {
 fn sqlite_error(database: sqlite.Database, error_code: sqlite.Error) !Response {
     error_code catch {};
     const error_text = database.errmsg();
-    return print_response(.TEXT, .bad_request, "{s}", .{error_text});
+    return print_response(.TEXT, .bad_request, "{s}: {s}", .{ @errorName(error_code), error_text });
 }
 
 fn on_request_fallible(r: zap.SimpleRequest) !Response {
