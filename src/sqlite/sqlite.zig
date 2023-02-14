@@ -5,35 +5,55 @@ const c = @cImport({
 
 pub const Database = @This();
 pub const Error = error{
-    Failed,
-    NotImplemented,
+    Unknown,
+    Abort,
+    Auth,
+    Busy,
+    CantOpen,
+    Constraint,
+    Corrupt,
+    Done,
+    Empty,
+    Error,
+    Format,
+    Full,
+    Internal,
+    Interrupt,
+    IoErr,
+    Locked,
+    Mismatch,
+    Misuse,
+    NoLfs,
+    NoMem,
+    NotADb,
+    NotFound,
+    Notice,
+    Perm,
+    Protocol,
+    Range,
+    ReadOnly,
+    Row,
+    Schema,
+    TooBig,
+    Warning,
 };
 
 db: *c.sqlite3,
 
 pub fn open(filename: [:0]const u8) Error!Database {
     var db: ?*c.sqlite3 = undefined;
-    const rc: c_int = c.sqlite3_open(filename.ptr, &db);
-    if (rc != 0) {
-        return error.Failed;
-    }
+    try check(c.sqlite3_open(filename.ptr, &db));
     return .{
         .db = db orelse unreachable,
     };
 }
 
 pub fn close(self: *Database) Error!void {
-    const rc = c.sqlite3_close(self.db);
-    if (rc != 0) {
-        return error.Failed;
-    }
+    try check(c.sqlite3_close(self.db));
 }
 
 pub fn exec_no_callback(self: *Database, script: [:0]const u8) Error!void {
-    const rc: c_int = c.sqlite3_exec(self.db, script.ptr, null, null, null);
-    if (rc != 0) {
-        return error.Failed;
-    }
+    try check(c.sqlite3_exec(self.db, script.ptr, null, null, null));
 }
 
 pub fn errmsg(self: Database) [:0]const u8 {
@@ -92,7 +112,7 @@ pub const Statement = struct {
         return switch (rc) {
             c.SQLITE_DONE => null,
             c.SQLITE_ROW => .{ .stmt = self.stmt },
-            else => error.Failed,
+            else => to_error(rc),
         };
     }
 
@@ -106,22 +126,59 @@ pub const Statement = struct {
     }
 
     pub fn finalize(self: *Statement) Error!void {
-        const rc: c_int = c.sqlite3_finalize(self.stmt);
-        if (rc != 0) {
-            return error.Failed;
-        }
+        try check(c.sqlite3_finalize(self.stmt));
     }
 };
 
 pub fn prepare(self: *Database, sql: []const u8) Error!Statement {
     var stmt: ?*c.sqlite3_stmt = undefined;
-    const rc: c_int = c.sqlite3_prepare_v2(self.db, sql.ptr, @intCast(c_int, sql.len), &stmt, null);
-    if (rc != 0) {
-        const text = c.sqlite3_errstr(rc);
-        std.debug.print("SQLITE ERROR: {} {s}\n", .{ rc, std.mem.sliceTo(text, 0) });
-        return error.Failed;
-    }
+    try check(c.sqlite3_prepare_v2(self.db, sql.ptr, @intCast(c_int, sql.len), &stmt, null));
     return .{
         .stmt = stmt orelse unreachable,
+    };
+}
+
+fn check(rc: c_int) Error!void {
+    if (rc == 0) {
+        return;
+    }
+    const text = c.sqlite3_errstr(rc);
+    std.debug.print("SQLITE ERROR: {} {s}\n", .{ rc, std.mem.sliceTo(text, 0) });
+    return to_error(rc);
+}
+
+fn to_error(rc: c_int) Error {
+    return switch (rc) {
+        c.SQLITE_ABORT => error.Abort,
+        c.SQLITE_AUTH => error.Auth,
+        c.SQLITE_BUSY => error.Busy,
+        c.SQLITE_CANTOPEN => error.CantOpen,
+        c.SQLITE_CONSTRAINT => error.Constraint,
+        c.SQLITE_CORRUPT => error.Corrupt,
+        c.SQLITE_DONE => error.Done,
+        c.SQLITE_EMPTY => error.Empty,
+        c.SQLITE_ERROR => error.Error,
+        c.SQLITE_FORMAT => error.Format,
+        c.SQLITE_FULL => error.Full,
+        c.SQLITE_INTERNAL => error.Internal,
+        c.SQLITE_INTERRUPT => error.Interrupt,
+        c.SQLITE_IOERR => error.IoErr,
+        c.SQLITE_LOCKED => error.Locked,
+        c.SQLITE_MISMATCH => error.Mismatch,
+        c.SQLITE_MISUSE => error.Misuse,
+        c.SQLITE_NOLFS => error.NoLfs,
+        c.SQLITE_NOMEM => error.NoMem,
+        c.SQLITE_NOTADB => error.NotADb,
+        c.SQLITE_NOTFOUND => error.NotFound,
+        c.SQLITE_NOTICE => error.Notice,
+        c.SQLITE_PERM => error.Perm,
+        c.SQLITE_PROTOCOL => error.Protocol,
+        c.SQLITE_RANGE => error.Range,
+        c.SQLITE_READONLY => error.ReadOnly,
+        c.SQLITE_ROW => error.Row,
+        c.SQLITE_SCHEMA => error.Schema,
+        c.SQLITE_TOOBIG => error.TooBig,
+        c.SQLITE_WARNING => error.Warning,
+        else => error.Unknown,
     };
 }
