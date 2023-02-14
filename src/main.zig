@@ -1,20 +1,52 @@
 const std = @import("std");
 const zap = @import("zap");
 const sqlite = @import("sqlite/sqlite.zig");
+const ArrayList = std.ArrayList;
 
-fn arrayListWrite(list: *std.ArrayList(u8), value: []const u8) std.mem.Allocator.Error!usize {
+var gpa: std.heap.GeneralPurposeAllocator(.{}) = undefined;
+
+fn arrayListWrite(list: *ArrayList(u8), value: []const u8) std.mem.Allocator.Error!usize {
     try list.appendSlice(value);
     return value.len;
 }
-const StringWriter = std.io.Writer(*std.ArrayList(u8), std.mem.Allocator.Error, arrayListWrite);
+const StringWriter = std.io.Writer(*ArrayList(u8), std.mem.Allocator.Error, arrayListWrite);
 
-fn on_request_fallible(r: zap.SimpleRequest) !void {
+const Response = struct {
+    status_code: zap.StatusCode,
+    content_type: zap.ContentType,
+    body: ArrayList(u8),
+
+    pub fn deinit(self: Response) void {
+        self.body.deinit();
+    }
+};
+
+fn print_response(content_type: zap.ContentType, status_code: zap.StatusCode, comptime format: []const u8, args: anytype) !Response {
+    var body = ArrayList(u8).init(gpa.allocator());
+    errdefer body.deinit();
+
+    var stream = StringWriter{ .context = &body };
+    try stream.print(format, args);
+
+    return Response{
+        .status_code = status_code,
+        .content_type = content_type,
+        .body = body,
+    };
+}
+
+fn internal_server_error(comptime format: []const u8, args: anytype) !Response {
+    return print_response(.TEXT, .internal_server_error, format, args);
+}
+
+fn bad_request(comptime format: []const u8, args: anytype) !Response {
+    return print_response(.TEXT, .bad_request, format, args);
+}
+
+fn on_request_fallible(r: zap.SimpleRequest) !Response {
     if (r.path) |the_path| {
         std.debug.print("PATH: {s}\n", .{the_path});
     }
-
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
 
     if (r.query) |the_query| {
         std.debug.print("QUERY: {s}\n", .{the_query});
@@ -23,16 +55,17 @@ fn on_request_fallible(r: zap.SimpleRequest) !void {
     var database: sqlite.Database = try sqlite.open("/tmp/test.db");
     defer database.close() catch unreachable;
 
-    var body = r.body orelse return error.NoBody;
+    var body = r.body orelse return internal_server_error("Invalid query. No body was specified.", .{});
     var statement: sqlite.Statement = try database.prepare(body);
     defer statement.finalize() catch unreachable;
 
     const columns = statement.column_count();
     std.debug.print("column count: {}\n", .{columns});
 
-    var buf = std.ArrayList(u8).init(gpa.allocator());
-    defer buf.deinit();
-    var stream = StringWriter{ .context = &buf };
+    var buf: ?ArrayList(u8) = ArrayList(u8).init(gpa.allocator());
+    defer if (buf) |b| b.deinit();
+
+    var stream = StringWriter{ .context = &buf.? };
     var w = std.json.writeStream(stream, 10);
 
     try w.beginObject();
@@ -61,22 +94,27 @@ fn on_request_fallible(r: zap.SimpleRequest) !void {
     try w.endArray();
     try w.endObject();
 
-    _ = r.sendBody(buf.items);
+    const response = .{
+        .status_code = .ok,
+        .content_type = .JSON,
+        .body = buf.?,
+    };
+    buf = null;
+    return response;
 }
 
 fn on_request_verbose(r: zap.SimpleRequest) void {
-    on_request_fallible(r) catch |e| {
-        switch (e) {
-            error.NoBody => {
-                r.setStatus(.bad_request);
-                _ = r.sendBody("No body was specified. The query should be specified as a body.");
-            },
-            else => {
-                r.setStatus(.internal_server_error);
-                _ = r.sendBody("Something went wrong");
-            },
-        }
+    const response = on_request_fallible(r) catch |e| internal_server_error("Internal Server Error: {s}", .{@errorName(e)}) catch {
+        r.setStatus(.internal_server_error);
+        r.setContentType(.TEXT);
+        _ = r.sendBody("Internal Server Error: Out Of Memory");
+        return;
     };
+    defer response.deinit();
+
+    r.setStatus(response.status_code);
+    r.setContentType(response.content_type);
+    _ = r.sendBody(response.body.items);
 }
 
 fn on_request_minimal(r: zap.SimpleRequest) void {
@@ -84,6 +122,9 @@ fn on_request_minimal(r: zap.SimpleRequest) void {
 }
 
 pub fn main() !void {
+    gpa = .{};
+    defer _ = gpa.deinit();
+
     var database: sqlite.Database = try sqlite.open("/tmp/test.db");
     defer database.close() catch unreachable;
 
@@ -113,7 +154,7 @@ pub fn main() !void {
 }
 
 test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
+    var list = ArrayList(i32).init(std.testing.allocator);
     defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
     try list.append(42);
     try std.testing.expectEqual(@as(i32, 42), list.pop());
