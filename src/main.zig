@@ -43,6 +43,11 @@ fn bad_request(comptime format: []const u8, args: anytype) !Response {
     return print_response(.TEXT, .bad_request, format, args);
 }
 
+fn sqlite_error(database: sqlite.Database) !Response {
+    const error_text = database.errmsg();
+    return print_response(.TEXT, .bad_request, "{s}", .{error_text});
+}
+
 fn on_request_fallible(r: zap.SimpleRequest) !Response {
     if (r.path) |the_path| {
         std.debug.print("PATH: {s}\n", .{the_path});
@@ -56,7 +61,7 @@ fn on_request_fallible(r: zap.SimpleRequest) !Response {
     defer database.close() catch unreachable;
 
     var body = r.body orelse return internal_server_error("Invalid query. No body was specified.", .{});
-    var statement: sqlite.Statement = try database.prepare(body);
+    var statement: sqlite.Statement = database.prepare(body) catch return sqlite_error(database);
     defer statement.finalize() catch unreachable;
 
     const columns = statement.column_count();
@@ -80,7 +85,7 @@ fn on_request_fallible(r: zap.SimpleRequest) !Response {
     try w.objectField("rows");
     try w.beginArray();
 
-    while (try statement.step()) |row| {
+    while (statement.step() catch return sqlite_error(database)) |row| {
         try w.arrayElem();
         try w.beginArray();
         var column_iter = row.get_columns();

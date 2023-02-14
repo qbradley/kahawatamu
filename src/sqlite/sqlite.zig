@@ -36,6 +36,11 @@ pub fn exec_no_callback(self: *Database, script: [:0]const u8) Error!void {
     }
 }
 
+pub fn errmsg(self: Database) [:0]const u8 {
+    const text = c.sqlite3_errmsg(self.db);
+    return std.mem.sliceTo(text, 0);
+}
+
 pub const Column = struct {
     index: usize,
 
