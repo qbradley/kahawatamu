@@ -1,17 +1,15 @@
 .{
-	.name = "kahawatamu",
-	.version = "0.0.1",
+    .name = "kahawatamu",
+    .version = "0.0.1",
 
-	.dependencies = .{
-		.zap = .{
-			//.url = "https://github.com/qbradley/zap/archive/631ee2a02609bb8c721682dbc7f8248ecca27874.tar.gz",
-			//.hash = "1220480753126239aa73ab9e8fb13501b50f696ebf74bb70f68da82f869f2108ff69",
-			.url = "https://github.com/renerocksai/zap/archive/80b475729a3863d338b8f3bc208bf934dc4e1299.tar.gz",
-			.hash = "1220c84a187bf0b2f676d4b24bd12f6a0433cce0a0d52690e481baa1de1603588bef",
-		},
-		.@"facil.io" = .{
-            .url = "https://github.com/renerocksai/facil.io/archive/2c04cd1949328dd62fe5d262b9cc930e54392ab8.tar.gz",
+    .dependencies = .{
+        .zap = .{
+            .url = "https://github.com/qbradley/zap/archive/4427286969b1535c3af262ed8b641a33a33a2a96.tar.gz",
+            .hash = "1220c5b4e2de12b44f4df4c4d1423a3179e56a593e1c1133f8206d4c0a290ed6b4c0",
+        },
+        .@"facil.io" = .{
+            .url = "https://github.com/zigzap/facil.io/archive/2c04cd1949328dd62fe5d262b9cc930e54392ab8.tar.gz",
             .hash = "12209d3b552145f24431e5a2e6a4ad59ceaa9656f7fba8af7a8aa704a8784a79f55d",
-		}
-	},
+        }
+    },
 }
