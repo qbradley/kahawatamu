@@ -12,7 +12,6 @@ pub const Error = error{
     CantOpen,
     Constraint,
     Corrupt,
-    Done,
     Empty,
     Error,
     Format,
@@ -32,10 +31,10 @@ pub const Error = error{
     Protocol,
     Range,
     ReadOnly,
-    Row,
     Schema,
     TooBig,
     Warning,
+    // Ok, Done, and Row are not errors.
 };
 
 db: *c.sqlite3,
@@ -139,7 +138,7 @@ pub fn prepare(self: *Database, sql: []const u8) Error!Statement {
 }
 
 fn check(rc: c_int) Error!void {
-    if (rc == 0) {
+    if (rc == c.SQLITE_OK) {
         return;
     }
     const text = c.sqlite3_errstr(rc);
@@ -148,14 +147,14 @@ fn check(rc: c_int) Error!void {
 }
 
 fn to_error(rc: c_int) Error {
-    return switch (rc) {
+    const primary_result_code = rc & 0xff;
+    return switch (primary_result_code) {
         c.SQLITE_ABORT => error.Abort,
         c.SQLITE_AUTH => error.Auth,
         c.SQLITE_BUSY => error.Busy,
         c.SQLITE_CANTOPEN => error.CantOpen,
         c.SQLITE_CONSTRAINT => error.Constraint,
         c.SQLITE_CORRUPT => error.Corrupt,
-        c.SQLITE_DONE => error.Done,
         c.SQLITE_EMPTY => error.Empty,
         c.SQLITE_ERROR => error.Error,
         c.SQLITE_FORMAT => error.Format,
@@ -175,7 +174,6 @@ fn to_error(rc: c_int) Error {
         c.SQLITE_PROTOCOL => error.Protocol,
         c.SQLITE_RANGE => error.Range,
         c.SQLITE_READONLY => error.ReadOnly,
-        c.SQLITE_ROW => error.Row,
         c.SQLITE_SCHEMA => error.Schema,
         c.SQLITE_TOOBIG => error.TooBig,
         c.SQLITE_WARNING => error.Warning,
