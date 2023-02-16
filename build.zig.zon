@@ -4,8 +4,8 @@
 
     .dependencies = .{
         .zap = .{
-            .url = "https://github.com/qbradley/zap/archive/4427286969b1535c3af262ed8b641a33a33a2a96.tar.gz",
-            .hash = "1220c5b4e2de12b44f4df4c4d1423a3179e56a593e1c1133f8206d4c0a290ed6b4c0",
+            .url = "https://github.com/zigzap/zap/archive/087b000745975ddcc72a0cf361f8c4eed5513f35.tar.gz",
+            .hash = "1220654bd8efa3f8e145d563681f0624a009863c103b56ce7fd1494f023c03ca0e18",
         },
         .@"facil.io" = .{
             .url = "https://github.com/zigzap/facil.io/archive/2c04cd1949328dd62fe5d262b9cc930e54392ab8.tar.gz",
