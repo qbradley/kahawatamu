@@ -4,8 +4,8 @@
 
 	.dependencies = .{
 		.@"lunatic-zig" = .{
-			.url = "https://github.com/qbradley/lunatic-zig/archive/402b1229320594b8bb571917393ddcd1662bf8b1.tar.gz",
-			.hash = "1220c0ffe52b984798e98d53fa140a68b9ee1d91ac2d4c203f701c90bb2d2347fc57",
+			.url = "https://github.com/qbradley/lunatic-zig/archive/364b226b4def1e7ad5176a63c7fd2d85bb2893f0.tar.gz",
+			.hash = "1220a98d3da25227f57e3e22a8e6f75efee39e237a3ce78e5b6e27d3fd0fd70c8df2",
 		},
 		.s2s = .{
 			.url = "https://github.com/qbradley/s2s/archive/99f4f90f8ff0ea02c4ab40b12d7393f4bdb2b080.tar.gz",

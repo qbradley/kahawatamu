@@ -5,16 +5,15 @@ pub fn build(b: *std.Build) void {
         .default_target = .{ .cpu_arch = .wasm32, .os_tag = .wasi },
     });
 
-    // Standard optimization options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
-    // set a preferred release mode, allowing the user to decide how to optimize.
-    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSmall });
+    const optimize = b.standardOptimizeOption(.{});
 
     const lunatic_zig = b.dependency("lunatic-zig", .{
         .target = target,
+        //.optimize = optimize,
     });
     const s2s = b.dependency("s2s", .{
         .target = target,
+        //.optimize = optimize,
     });
 
     const exe = b.addExecutable(.{
