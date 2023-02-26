@@ -1,0 +1,16 @@
+.{
+	.name = "kahawatamu-luantic",
+	.version = "0.0.1",
+
+	.dependencies = .{
+		.@"lunatic-zig" = .{
+			.url = "https://github.com/qbradley/lunatic-zig/archive/402b1229320594b8bb571917393ddcd1662bf8b1.tar.gz",
+			.hash = "1220c0ffe52b984798e98d53fa140a68b9ee1d91ac2d4c203f701c90bb2d2347fc57",
+		},
+		.s2s = .{
+			.url = "https://github.com/qbradley/s2s/archive/99f4f90f8ff0ea02c4ab40b12d7393f4bdb2b080.tar.gz",
+			.hash = "1220bc26dcf058bbbf586592560053ee55c6b669869b4e44d03eac607aa68af679e4",
+		}
+	},
+}
+
