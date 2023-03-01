@@ -11,9 +11,17 @@ pub fn build(b: *std.Build) void {
         .target = target,
         //.optimize = optimize,
     });
-    const s2s = b.dependency("s2s", .{
+    _ = lunatic_zig;
+    const bincode_zig = b.dependency("bincode-zig", .{
         .target = target,
         //.optimize = optimize,
+    });
+
+    const lunatic_zig_local = b.createModule(.{
+        .source_file = .{ .path = "../lunatic-zig/src/lunatic.zig" },
+        .dependencies = &.{
+            .{ .name = "bincode-zig", .module = bincode_zig.module("bincode-zig") },
+        },
     });
 
     const exe = b.addExecutable(.{
@@ -22,10 +30,13 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    exe.addModule("lunatic-zig", lunatic_zig.module("lunatic-zig"));
-    exe.addModule("s2s", s2s.module("s2s"));
+    //exe.addModule("lunatic-zig", lunatic_zig.module("lunatic-zig"));
+    exe.addModule("lunatic-zig", lunatic_zig_local);
+    exe.addModule("bincode-zig", bincode_zig.module("bincode-zig"));
     exe.export_symbol_names = &.{
         "handle",
+        "lunatic_alloc",
+        "lunatic_free",
     };
     exe.install();
 

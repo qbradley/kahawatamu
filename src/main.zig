@@ -111,6 +111,8 @@ fn handleImpl() !void {
         std.debug.print(" '{s}': '{s}'\n", .{ header.key, header.value });
     }
 
+    try sqlite();
+
     _ = try socket.write("HTTP/1.1 200 OK\r\n" ++
         "\r\n" ++
         "Response!\r\n");
@@ -165,7 +167,9 @@ pub fn receiveSocket() !Socket {
 
 fn spawnChild(socket: Socket) !void {
     errdefer socket.deinit();
-    const child = try lunatic.Process.spawn("handle", .{}, .{});
+    var config = try lunatic.Process.create_config();
+    config.preopen_dir("/tmp");
+    const child = try lunatic.Process.spawn("handle", .{}, .{ .config = config });
     const stream = lunatic.Message.create_message_stream(0, 128);
     try stream.writeTcpStream(socket);
     try stream.send(child);
@@ -185,6 +189,39 @@ fn dump() !void {
         amount = try socket.read(buf[0..]);
         std.debug.print("{}\n", .{amount});
         std.debug.print("{s}", .{buf[0..amount]});
+    }
+}
+
+fn sqlite() !void {
+    std.debug.print("open\n", .{});
+    var db = try lunatic.Sqlite.open("/tmp/test.db");
+    std.debug.print("execute\n", .{});
+    try db.execute("CREATE TABLE IF NOT EXISTS test(key TEXT PRIMARY KEY, value TEXT)");
+    var create = false;
+    if (create) {
+        std.debug.print("query_prepare\n", .{});
+        var statement = db.query_prepare("INSERT INTO test (key, value) VALUES (?,?)");
+        std.debug.print("bind_value\n", .{});
+        try statement.bind_value(&.{
+            .{ .key = .{ .Numeric = 1 }, .value = .{ .Text = "a" } },
+            .{ .key = .{ .Numeric = 2 }, .value = .{ .Text = "b" } },
+        });
+        const more = statement.step();
+        std.debug.print("more: {}\n", .{more});
+    } else {
+        var statement = db.query_prepare("SELECT value FROM test WHERE key <> ?");
+        try statement.bind_value(&.{
+            .{ .key = .{ .Numeric = 1 }, .value = .{ .Text = "a" } },
+        });
+        while (statement.step()) {
+            std.debug.print("Stepped!\n", .{});
+            var row_result = try statement.read_row(std.heap.wasm_allocator);
+            defer row_result.deinit();
+
+            for (0.., row_result.result) |idx, col| {
+                std.debug.print("{} {}\n", .{ idx, col });
+            }
+        }
     }
 }
 

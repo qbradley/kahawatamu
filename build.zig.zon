@@ -7,9 +7,9 @@
 			.url = "https://github.com/qbradley/lunatic-zig/archive/364b226b4def1e7ad5176a63c7fd2d85bb2893f0.tar.gz",
 			.hash = "1220a98d3da25227f57e3e22a8e6f75efee39e237a3ce78e5b6e27d3fd0fd70c8df2",
 		},
-		.s2s = .{
-			.url = "https://github.com/qbradley/s2s/archive/99f4f90f8ff0ea02c4ab40b12d7393f4bdb2b080.tar.gz",
-			.hash = "1220bc26dcf058bbbf586592560053ee55c6b669869b4e44d03eac607aa68af679e4",
+		.@"bincode-zig" = .{
+			.url = "https://github.com/qbradley/bincode-zig/archive/2a6dce5616354dd8c793fb3aec2e1e2458a09018.tar.gz",
+			.hash = "12204c7201e3da18d1d355efdc6da845bf6e8de9cb81f2c2c6f62a64b7378d993b48",
 		}
 	},
 }
