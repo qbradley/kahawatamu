@@ -5,97 +5,18 @@ const Socket = lunatic.Networking.Socket;
 const SocketError = lunatic.Networking.Error;
 
 pub const SocketReader = std.io.Reader(Socket, SocketError, Socket.read);
-
-pub fn HttpRequestReader(comptime Context: type, comptime ContextErrors: type) type {
-    return struct {
-        context: Context,
-        filled: usize,
-        header_bytes: usize,
-        buffer: [8192]u8,
-
-        pub const Error = error{
-            ConnectionBroken,
-            InvalidRequestLine,
-            InvalidHeaderLine,
-            TooBig, //413
-        } || ContextErrors;
-
-        pub fn init(context: Context) Error!@This() {
-            var request = @This(){
-                .context = context,
-                .filled = 0,
-                .header_bytes = 0,
-                .buffer = undefined,
-            };
-            try request.readHeaders();
-            return request;
-        }
-
-        fn readHeaders(self: *@This()) Error!void {
-            while (true) {
-                const amount = try self.context.read(self.buffer[self.filled..]);
-                if (amount == 0) {
-                    return error.ConnectionBroken;
-                }
-                self.filled += amount;
-                if (std.mem.indexOf(u8, self.buffer[0..self.filled], "\r\n\r\n")) |position| {
-                    self.header_bytes = position;
-                    return;
-                }
-                if (self.filled == self.buffer.len) {
-                    return error.TooBig;
-                }
-            }
-        }
-
-        pub fn requestLine(self: *@This()) Error![]const u8 {
-            var _lines = self.lines();
-            if (_lines.next()) |line| {
-                return line;
-            } else {
-                return error.InvalidRequestLine;
-            }
-        }
-
-        pub fn headers(self: *@This()) HeaderIterator {
-            var iterator = HeaderIterator{
-                .lines = self.lines(),
-            };
-            _ = iterator.lines.next();
-            return iterator;
-        }
-
-        pub const Header = struct {
-            key: []const u8,
-            value: []const u8,
-        };
-
-        pub const HeaderIterator = struct {
-            lines: std.mem.TokenIterator(u8),
-
-            pub fn next(self: *HeaderIterator) Error!?Header {
-                if (self.lines.next()) |line| {
-                    if (std.mem.indexOf(u8, line, ": ")) |divider| {
-                        return .{
-                            .key = line[0..divider],
-                            .value = line[divider + 2 ..],
-                        };
-                    } else {
-                        return error.InvalidHeaderLine;
-                    }
-                } else {
-                    return null;
-                }
-            }
-        };
-
-        fn lines(self: *@This()) std.mem.TokenIterator(u8) {
-            return std.mem.tokenize(u8, self.buffer[0..self.header_bytes], "\r\n");
-        }
-    };
+fn arrayListWrite(list: *std.ArrayList(u8), value: []const u8) std.mem.Allocator.Error!usize {
+    try list.appendSlice(value);
+    return value.len;
 }
+const StringWriter = std.io.Writer(*std.ArrayList(u8), std.mem.Allocator.Error, arrayListWrite);
+
+const HttpRequestReader = @import("http.zig").HttpRequestReader;
 
 fn handleImpl() !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.wasm_allocator);
+    defer arena.deinit();
+
     const socket = try receiveSocket();
     std.debug.print("Child {} got socket {}\n", .{
         lunatic.Process.process_id(),
@@ -103,19 +24,47 @@ fn handleImpl() !void {
     });
     defer socket.deinit();
 
+    var content_length: usize = 0;
     var reader = try HttpRequestReader(Socket, SocketError).init(socket);
     var request = try reader.requestLine();
     std.debug.print(">> {s} <<\n", .{request});
     var headers = reader.headers();
     while (try headers.next()) |header| {
+        if (std.ascii.eqlIgnoreCase(header.key, "content-length")) {
+            content_length = try std.fmt.parseUnsigned(usize, header.value, 10);
+        }
         std.debug.print(" '{s}': '{s}'\n", .{ header.key, header.value });
     }
 
-    try sqlite();
+    if (content_length > 0) {
+        const buffer = try std.heap.wasm_allocator.alloc(u8, content_length);
+        defer std.heap.wasm_allocator.free(buffer);
 
-    _ = try socket.write("HTTP/1.1 200 OK\r\n" ++
-        "\r\n" ++
-        "Response!\r\n");
+        try reader.readBody(buffer);
+        var result = try sqlite(buffer, std.heap.wasm_allocator);
+
+        var response = try std.fmt.allocPrint(
+            std.heap.wasm_allocator,
+            "HTTP/1.1 200 OK\r\n" ++
+                "Content-Type: text/plain\r\n" ++
+                "Content-Length: {}\r\n" ++
+                "\r\n" ++
+                "{s}",
+            .{
+                result.items.len,
+                result.items,
+            },
+        );
+        defer std.heap.wasm_allocator.free(response);
+
+        _ = try socket.write(response);
+    } else {
+        _ = try socket.write("HTTP/1.1 400 Bad Request\r\n" ++
+            "Content-Type: text/plain\r\n" ++
+            "Content-Length: 31\r\n" ++
+            "\r\n" ++
+            "Expected a query in the body.\r\n");
+    }
 }
 
 pub export fn handle() void {
@@ -192,53 +141,50 @@ fn dump() !void {
     }
 }
 
-fn sqlite() !void {
-    std.debug.print("open\n", .{});
+fn sqlite(query: []const u8, allocator: std.mem.Allocator) !std.ArrayList(u8) {
     var db = try lunatic.Sqlite.open("/tmp/test.db");
-    std.debug.print("execute\n", .{});
-    try db.execute("CREATE TABLE IF NOT EXISTS test(key TEXT PRIMARY KEY, value TEXT)");
-    var create = false;
-    if (create) {
-        std.debug.print("query_prepare\n", .{});
-        var statement = db.query_prepare("INSERT INTO test (key, value) VALUES (?,?)");
-        std.debug.print("bind_value\n", .{});
-        try statement.bind_value(&.{
-            .{ .key = .{ .Numeric = 1 }, .value = .{ .Text = "a" } },
-            .{ .key = .{ .Numeric = 2 }, .value = .{ .Text = "b" } },
-        });
-        const more = statement.step();
-        std.debug.print("more: {}\n", .{more});
-    } else {
-        var statement = db.query_prepare("SELECT * FROM test WHERE key <> ?");
-        defer statement.deinit();
 
-        var arena = std.heap.ArenaAllocator.init(std.heap.wasm_allocator);
-        defer arena.deinit();
+    var statement = db.query_prepare(query);
+    defer statement.deinit();
 
-        const keys: []const []const u8 = &.{ "a", "x", "q" };
+    var buf = std.ArrayList(u8).init(allocator);
+    errdefer buf.deinit();
 
-        for (keys) |key| {
-            std.debug.print("\nreset\n", .{});
-            statement.reset();
+    var stream = StringWriter{ .context = &buf };
+    var w = std.json.writeStream(stream, 10);
 
-            try statement.bind_values_by_position(.{key});
-            while (statement.step()) {
-                const columns = statement.column_count();
-                std.debug.print("Stepped! {} columns\n", .{columns});
-                for (0..columns) |column| {
-                    var col = try statement.read_column(column, arena.allocator());
-                    var name = try statement.column_name(column, arena.allocator());
-                    var names = (try statement.column_names(arena.allocator())).result;
+    const columns = statement.column_count();
+    try w.beginObject();
+    try w.objectField("columns");
+    try w.beginArray();
+    for (0..columns) |index| {
+        var name = try statement.column_name(index, allocator);
+        try w.arrayElem();
+        try w.emitString(name);
+    }
+    try w.endArray();
+    try w.objectField("rows");
+    try w.beginArray();
 
-                    switch (col.result) {
-                        .Text => |txt| std.debug.print("{} {s} {s}: '{s}'\n", .{ column, names[column], name, txt }),
-                        .Integer => |num| std.debug.print("{} {s} {s}: {}\n", .{ column, names[column], name, num }),
-                        else => std.debug.print("{} {s} {s}: {}\n", .{ column, names[column], name, col }),
-                    }
-                }
+    while (statement.step()) {
+        try w.arrayElem();
+        try w.beginArray();
+        for (0..columns) |column| {
+            var col = try statement.read_column(column, allocator);
+
+            try w.arrayElem();
+            switch (col.result) {
+                .Text => |txt| try w.emitString(txt),
+                .Integer => |num| try w.emitNumber(num),
+                else => try w.emitNull(),
             }
         }
+        try w.endArray();
     }
+    try w.endArray();
+    try w.endObject();
+
+    return buf;
 }
 
 pub fn main() !void {
