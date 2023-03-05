@@ -209,17 +209,33 @@ fn sqlite() !void {
         const more = statement.step();
         std.debug.print("more: {}\n", .{more});
     } else {
-        var statement = db.query_prepare("SELECT value FROM test WHERE key <> ?");
-        try statement.bind_value(&.{
-            .{ .key = .{ .Numeric = 1 }, .value = .{ .Text = "a" } },
-        });
-        while (statement.step()) {
-            std.debug.print("Stepped!\n", .{});
-            var row_result = try statement.read_row(std.heap.wasm_allocator);
-            defer row_result.deinit();
+        var statement = db.query_prepare("SELECT * FROM test WHERE key <> ?");
+        defer statement.deinit();
 
-            for (0.., row_result.result) |idx, col| {
-                std.debug.print("{} {}\n", .{ idx, col });
+        var arena = std.heap.ArenaAllocator.init(std.heap.wasm_allocator);
+        defer arena.deinit();
+
+        const keys: []const []const u8 = &.{ "a", "x", "q" };
+
+        for (keys) |key| {
+            std.debug.print("\nreset\n", .{});
+            statement.reset();
+
+            try statement.bind_values_by_position(.{key});
+            while (statement.step()) {
+                const columns = statement.column_count();
+                std.debug.print("Stepped! {} columns\n", .{columns});
+                for (0..columns) |column| {
+                    var col = try statement.read_column(column, arena.allocator());
+                    var name = try statement.column_name(column, arena.allocator());
+                    var names = (try statement.column_names(arena.allocator())).result;
+
+                    switch (col.result) {
+                        .Text => |txt| std.debug.print("{} {s} {s}: '{s}'\n", .{ column, names[column], name, txt }),
+                        .Integer => |num| std.debug.print("{} {s} {s}: {}\n", .{ column, names[column], name, num }),
+                        else => std.debug.print("{} {s} {s}: {}\n", .{ column, names[column], name, col }),
+                    }
+                }
             }
         }
     }

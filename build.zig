@@ -33,11 +33,7 @@ pub fn build(b: *std.Build) void {
     //exe.addModule("lunatic-zig", lunatic_zig.module("lunatic-zig"));
     exe.addModule("lunatic-zig", lunatic_zig_local);
     exe.addModule("bincode-zig", bincode_zig.module("bincode-zig"));
-    exe.export_symbol_names = &.{
-        "handle",
-        "lunatic_alloc",
-        "lunatic_free",
-    };
+    exe.rdynamic = true;
     exe.install();
 
     const run_cmd = b.addSystemCommand(&.{ "lunatic", "run", exe.out_filename });
