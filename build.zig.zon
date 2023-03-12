@@ -4,12 +4,13 @@
 
 	.dependencies = .{
 		.@"lunatic-zig" = .{
-			.url = "https://github.com/qbradley/lunatic-zig/archive/909b0b8bca297c29245475e375a7a7a0a970d7d3.tar.gz",
-			.hash = "1220d935ed8a7e13f40d9c17036df8d614455bf8a26fb418ac7aa04e495da30a2816",
+			.url = "https://github.com/qbradley/lunatic-zig/archive/614fbae5a3a373999fccfd88a79ac05f4e9c4169.tar.gz",
+			.hash = "122017c83932f65e644fcc5a8f54a24ec720a6ab4c8eab115ef0505d50b363933db4",
 		},
 		.@"bincode-zig" = .{
-            .url = "https://github.com/qbradley/bincode-zig/archive/22f9347ed1a0d275fbd49c58d5e76859c31962fc.tar.gz",
-            .hash = "12200f0952d5c962987e58dd204fa38d144af051f8aea76ba86d049265e6cad86430",
+            .url = "https://github.com/qbradley/bincode-zig/archive/42ca04a9e6fabf7a158187e2f3b575603d1c5677.tar.gz",
+            .hash = "1220fef76fcd31e70da6ec74dfdc2b38c45812c3f8b04fda8426d929402505ab8ebb",
 		}
 	},
 }
+
