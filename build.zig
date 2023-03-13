@@ -1,69 +1,53 @@
 const std = @import("std");
 
-// Although this function looks imperative, note that its job is to
-// declaratively construct a build graph that will be executed by an external
-// runner.
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
-
-    const zap = b.dependency("zap", .{
-        .target = target,
-        .optimize = optimize,
+    const target = b.standardTargetOptions(.{
+        .default_target = .{ .cpu_arch = .wasm32, .os_tag = .wasi },
     });
 
-    const facil = b.dependency("facil.io", .{
+    const optimize = b.standardOptimizeOption(.{});
+
+    const local_dependencies = b.option(bool, "local-dependencies", "build from local dependencies");
+
+    const lunatic_zig = b.dependency("lunatic-zig", .{
         .target = target,
-        .optimize = optimize,
+        //.optimize = optimize,
+    });
+    const bincode_zig = b.dependency("bincode-zig", .{
+        .target = target,
+        //.optimize = optimize,
+    });
+
+    const bincode_zig_local = b.createModule(.{
+        .source_file = .{ .path = "../bincode-zig/bincode.zig" },
+    });
+    const lunatic_zig_local = b.createModule(.{
+        .source_file = .{ .path = "../lunatic-zig/src/lunatic.zig" },
+        .dependencies = &.{
+            .{ .name = "bincode-zig", .module = bincode_zig_local },
+        },
     });
 
     const exe = b.addExecutable(.{
-        .name = "kahawatamu",
+        .name = "kahawatamu-lunatic",
         .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
         .optimize = optimize,
     });
-
-    exe.linkLibrary(facil.artifact("facil.io"));
-    exe.addModule("zap", zap.module("zap"));
-    exe.addIncludePath("src/sqlite");
-    exe.addCSourceFile("src/sqlite/sqlite3.c", &.{});
-    exe.linkLibC();
+    if (local_dependencies orelse false) {
+        exe.addModule("lunatic-zig", lunatic_zig_local);
+        exe.addModule("bincode-zig", bincode_zig_local);
+    } else {
+        exe.addModule("lunatic-zig", lunatic_zig.module("lunatic-zig"));
+        exe.addModule("bincode-zig", bincode_zig.module("bincode-zig"));
+    }
+    exe.rdynamic = true;
     exe.install();
 
-    // This *creates* a RunStep in the build graph, to be executed when another
-    // step is evaluated that depends on it. The next line below will establish
-    // such a dependency.
-    const run_cmd = exe.run();
-
-    // By making the run step depend on the install step, it will be run from the
-    // installation directory rather than directly from within the cache directory.
-    // This is not necessary, however, if the application depends on other installed
-    // files, this ensures they will be present and in the expected location.
+    const run_cmd = b.addSystemCommand(&.{ "lunatic", "run", exe.out_filename });
+    run_cmd.cwd = std.fmt.allocPrint(b.allocator, "{s}/bin", .{b.install_path}) catch unreachable;
     run_cmd.step.dependOn(b.getInstallStep());
 
-    // This allows the user to pass arguments to the application in the build
-    // command itself, like this: `zig build run -- arg1 arg2 etc`
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
-
-    // This creates a build step. It will be visible in the `zig build --help` menu,
-    // and can be selected like this: `zig build run`
-    // This will evaluate the `run` step rather than the default, which is "install".
-    const run_step = b.step("run", "Run the app");
+    const run_step = b.step("run", "Run the ap with lunatic");
     run_step.dependOn(&run_cmd.step);
-
-    // Creates a step for unit testing.
-    const exe_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/main.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // Similar to creating the run step earlier, this exposes a `test` step to
-    // the `zig build --help` menu, providing a way for the user to request
-    // running the unit tests.
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&exe_tests.step);
 }

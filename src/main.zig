@@ -1,205 +1,211 @@
 const std = @import("std");
-const zap = @import("zap");
-const sqlite = @import("sqlite/sqlite.zig");
-const ArrayList = std.ArrayList;
+const lunatic = @import("lunatic-zig");
+const s2s = @import("s2s");
+const Socket = lunatic.Networking.Socket;
+const SocketError = lunatic.Networking.Error;
 
-var gpa: std.heap.GeneralPurposeAllocator(.{}) = undefined;
-
-fn arrayListWrite(list: *ArrayList(u8), value: []const u8) std.mem.Allocator.Error!usize {
+pub const SocketReader = std.io.Reader(Socket, SocketError, Socket.read);
+fn arrayListWrite(list: *std.ArrayList(u8), value: []const u8) std.mem.Allocator.Error!usize {
     try list.appendSlice(value);
     return value.len;
 }
-const StringWriter = std.io.Writer(*ArrayList(u8), std.mem.Allocator.Error, arrayListWrite);
+const StringWriter = std.io.Writer(*std.ArrayList(u8), std.mem.Allocator.Error, arrayListWrite);
 
-const Response = struct {
-    status_code: zap.StatusCode,
-    content_type: zap.ContentType,
-    body: ArrayList(u8),
+const HttpRequestReader = @import("http.zig").HttpRequestReader;
 
-    pub fn deinit(self: Response) void {
-        self.body.deinit();
+fn handleImpl() !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.wasm_allocator);
+    defer arena.deinit();
+
+    const socket = try receiveSocket();
+    std.debug.print("Child {} got socket {}\n", .{
+        lunatic.Process.process_id(),
+        socket.socket_id,
+    });
+    defer socket.deinit();
+
+    var content_length: usize = 0;
+    var reader = try HttpRequestReader(Socket, SocketError).init(socket);
+    var request = try reader.requestLine();
+    std.debug.print(">> {s} <<\n", .{request});
+    var headers = reader.headers();
+    while (try headers.next()) |header| {
+        if (std.ascii.eqlIgnoreCase(header.key, "content-length")) {
+            content_length = try std.fmt.parseUnsigned(usize, header.value, 10);
+        }
+        std.debug.print(" '{s}': '{s}'\n", .{ header.key, header.value });
     }
-};
 
-fn print_response(content_type: zap.ContentType, status_code: zap.StatusCode, comptime format: []const u8, args: anytype) !Response {
-    var body = ArrayList(u8).init(gpa.allocator());
-    errdefer body.deinit();
+    if (content_length > 0) {
+        const buffer = try std.heap.wasm_allocator.alloc(u8, content_length);
+        defer std.heap.wasm_allocator.free(buffer);
 
-    var stream = StringWriter{ .context = &body };
-    try stream.print(format, args);
+        try reader.readBody(buffer);
+        var result = try sqlite(buffer, std.heap.wasm_allocator);
 
-    return Response{
-        .status_code = status_code,
-        .content_type = content_type,
-        .body = body,
-    };
+        var response = try std.fmt.allocPrint(
+            std.heap.wasm_allocator,
+            "HTTP/1.1 200 OK\r\n" ++
+                "Content-Type: text/plain\r\n" ++
+                "Content-Length: {}\r\n" ++
+                "\r\n" ++
+                "{s}",
+            .{
+                result.items.len,
+                result.items,
+            },
+        );
+        defer std.heap.wasm_allocator.free(response);
+
+        _ = try socket.write(response);
+    } else {
+        _ = try socket.write("HTTP/1.1 400 Bad Request\r\n" ++
+            "Content-Type: text/plain\r\n" ++
+            "Content-Length: 31\r\n" ++
+            "\r\n" ++
+            "Expected a query in the body.\r\n");
+    }
 }
 
-fn internal_server_error(comptime format: []const u8, args: anytype) !Response {
-    return print_response(.TEXT, .internal_server_error, format, args);
+pub export fn handle() void {
+    const process_id = lunatic.Process.process_id();
+    std.debug.print("Child {} started\n", .{process_id});
+    handleImpl() catch unreachable;
+    std.debug.print("Child {} stopped\n", .{process_id});
 }
 
-fn bad_request(comptime format: []const u8, args: anytype) !Response {
-    return print_response(.TEXT, .bad_request, format, args);
+pub fn send(process: lunatic.Process, comptime T: type, value: T) !void {
+    const stream = lunatic.Message.create_message_stream(0, 128);
+    try s2s.serialize(stream.writer(), T, value);
+    try stream.send(process);
 }
 
-fn sqlite_error(database: sqlite.Database, error_code: sqlite.Error) !Response {
-    error_code catch {};
-    const error_text = database.errmsg();
-    return print_response(.TEXT, .bad_request, "{s}: {s}", .{ @errorName(error_code), error_text });
-}
-
-fn on_request_fallible(r: zap.SimpleRequest) !Response {
-    if (r.path) |path| {
-        var path_iterator = std.mem.tokenize(u8, path, "/");
-        if (path_iterator.next()) |first| {
-            std.debug.print("first {s}\n", .{first});
-            if (std.mem.eql(u8, first, "db")) {
-                return on_request_db(r);
-            }
-            if (std.mem.eql(u8, first, "index.html")) {
-                return on_request_index(r);
-            }
-            return on_request_not_found(r);
+pub fn receive(comptime T: type) !T {
+    while (true) {
+        switch (lunatic.Message.receive_all(0)) {
+            .DataMessage => {
+                const stream = lunatic.MessageReader{};
+                return try s2s.deserialize(stream.reader(), T);
+            },
+            .SignalMessage => {
+                std.debug.print("Signal Message\n", .{});
+            },
+            .Timeout => {
+                std.debug.print("Timeout\n", .{});
+            },
         }
     }
-
-    return on_request_index(r);
 }
 
-fn on_request_not_found(_: zap.SimpleRequest) !Response {
-    var body = ArrayList(u8).init(gpa.allocator());
-    var stream = StringWriter{ .context = &body };
-    try stream.print("Not Found", .{});
-    return .{ .status_code = .not_found, .content_type = .TEXT, .body = body };
-}
-
-fn on_request_index(_: zap.SimpleRequest) !Response {
-    var body = ArrayList(u8).init(gpa.allocator());
-    var stream = StringWriter{ .context = &body };
-    try stream.print("{s}", .{@embedFile("html/index.html")});
-
-    return .{
-        .status_code = .ok,
-        .content_type = .HTML,
-        .body = body,
-    };
-}
-
-fn on_request_db(r: zap.SimpleRequest) !Response {
-    if (r.path) |the_path| {
-        std.debug.print("PATH: {s}\n", .{the_path});
+pub fn receiveSocket() !Socket {
+    while (true) {
+        switch (lunatic.Message.receive_all(0)) {
+            .DataMessage => {
+                const stream = lunatic.MessageReader{};
+                return stream.readTcpStream();
+            },
+            .SignalMessage => {
+                std.debug.print("Signal Message\n", .{});
+            },
+            .Timeout => {
+                std.debug.print("Timeout\n", .{});
+            },
+        }
     }
+}
 
-    if (r.query) |the_query| {
-        std.debug.print("QUERY: {s}\n", .{the_query});
+fn spawnChild(socket: Socket) !void {
+    errdefer socket.deinit();
+    var config = try lunatic.Process.create_config();
+    config.preopen_dir("/tmp");
+    const child = try lunatic.Process.spawn("handle", .{}, .{ .config = config });
+    const stream = lunatic.Message.create_message_stream(0, 128);
+    try stream.writeTcpStream(socket);
+    try stream.send(child);
+}
+
+fn dump() !void {
+    const socket = try lunatic.Networking.Tls.connect("google.com", 443, 5000, &.{});
+    defer socket.deinit();
+
+    var amount: usize = try socket.write("GET / HTTP/1.1\r\n\r\n");
+    std.debug.print("Wrote {}\n", .{amount});
+    try socket.flush();
+
+    amount = 1;
+    while (amount != 0) {
+        var buf: [1024]u8 = undefined;
+        amount = try socket.read(buf[0..]);
+        std.debug.print("{}\n", .{amount});
+        std.debug.print("{s}", .{buf[0..amount]});
     }
+}
 
-    var database: sqlite.Database = try sqlite.open("/tmp/test.db");
-    defer database.close() catch unreachable;
+fn sqlite(query: []const u8, allocator: std.mem.Allocator) !std.ArrayList(u8) {
+    var db = try lunatic.Sqlite.open("/tmp/test.db");
 
-    var body = r.body orelse return internal_server_error("Invalid query. No body was specified.", .{});
-    var statement: sqlite.Statement = database.prepare(body) catch |e| return sqlite_error(database, e);
-    defer statement.finalize() catch unreachable;
+    var statement = db.query_prepare(query);
+    defer statement.deinit();
 
-    const columns = statement.column_count();
-    std.debug.print("column count: {}\n", .{columns});
+    var buf = std.ArrayList(u8).init(allocator);
+    errdefer buf.deinit();
 
-    var buf: ?ArrayList(u8) = ArrayList(u8).init(gpa.allocator());
-    defer if (buf) |b| b.deinit();
-
-    var stream = StringWriter{ .context = &buf.? };
+    var stream = StringWriter{ .context = &buf };
     var w = std.json.writeStream(stream, 10);
 
+    const columns = statement.column_count();
     try w.beginObject();
     try w.objectField("columns");
     try w.beginArray();
-    var index: usize = 0;
-    while (index < columns) : (index += 1) {
+    for (0..columns) |index| {
+        var name = try statement.column_name(index, allocator);
         try w.arrayElem();
-        try w.emitString(statement.column_name(index));
+        try w.emitString(name);
     }
     try w.endArray();
     try w.objectField("rows");
     try w.beginArray();
 
-    while (statement.step() catch |e| return sqlite_error(database, e)) |row| {
+    while (statement.step()) {
         try w.arrayElem();
         try w.beginArray();
-        var column_iter = row.get_columns();
-        while (column_iter.next(row)) |column| {
+        for (0..columns) |column| {
+            var col = try statement.read_column(column, allocator);
+
             try w.arrayElem();
-            try w.emitString(column.get_text(row));
+            switch (col.result) {
+                .Text => |txt| try w.emitString(txt),
+                .Integer => |num| try w.emitNumber(num),
+                else => try w.emitNull(),
+            }
         }
         try w.endArray();
     }
-
     try w.endArray();
     try w.endObject();
 
-    const response = .{
-        .status_code = .ok,
-        .content_type = .JSON,
-        .body = buf.?,
-    };
-    buf = null;
-    return response;
-}
-
-fn on_request_verbose(r: zap.SimpleRequest) void {
-    const response = on_request_fallible(r) catch |e| internal_server_error("Internal Server Error: {s}", .{@errorName(e)}) catch {
-        r.setStatus(.internal_server_error);
-        r.setContentType(.TEXT);
-        _ = r.sendBody("Internal Server Error: Out Of Memory");
-        return;
-    };
-    defer response.deinit();
-
-    r.setStatus(response.status_code);
-    r.setContentType(response.content_type);
-    _ = r.sendBody(response.body.items);
-}
-
-fn on_request_minimal(r: zap.SimpleRequest) void {
-    _ = r.sendBody("<html><body><h1>Hello from ZAP!!!</h1></body></html>");
+    return buf;
 }
 
 pub fn main() !void {
-    gpa = .{};
-    defer _ = gpa.deinit();
-
-    var database: sqlite.Database = try sqlite.open("/tmp/test.db");
-    defer database.close() catch unreachable;
-
-    try database.exec_no_callback(
-        \\PRAGMA journal_mode=WAL;
-        \\CREATE TABLE IF NOT EXISTS properties (
-        \\  key TEXT,
-        \\  value TEXT
-        \\);
+    const version = lunatic.Version;
+    std.debug.print(
+        "Lunatic version {}.{}.{}\n",
+        .{ version.major(), version.minor(), version.patch() },
     );
 
-    var listener = zap.SimpleHttpListener.init(.{
-        .interface = "127.0.0.1",
-        .port = 3000,
-        .on_request = on_request_verbose,
-        .log = true,
-        .max_clients = 100000,
-    });
-    try listener.listen();
+    //ery dump();
 
-    std.debug.print("Listening on 0.0.0.0:3000\n", .{});
+    const listener = try lunatic.Networking.Tcp.bind4(.{ 127, 0, 0, 1 }, 3001);
+    defer listener.deinit();
 
-    // start worker threads
-    zap.start(.{
-        .threads = -1,
-        .workers = 1,
-    });
-}
+    const port = (try listener.local_address()).port;
+    std.debug.print("Listening on port {}\n", .{port});
 
-test "simple test" {
-    var list = ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
+    while (true) {
+        const socket = try listener.accept();
+        try spawnChild(socket);
+    }
+
+    std.debug.print("Goodbye\n", .{});
 }
