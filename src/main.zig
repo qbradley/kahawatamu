@@ -50,6 +50,43 @@ fn sqlite_error(database: sqlite.Database, error_code: sqlite.Error) !Response {
 }
 
 fn on_request_fallible(r: zap.SimpleRequest) !Response {
+    if (r.path) |path| {
+        var path_iterator = std.mem.tokenize(u8, path, "/");
+        if (path_iterator.next()) |first| {
+            std.debug.print("first {s}\n", .{first});
+            if (std.mem.eql(u8, first, "db")) {
+                return on_request_db(r);
+            }
+            if (std.mem.eql(u8, first, "index.html")) {
+                return on_request_index(r);
+            }
+            return on_request_not_found(r);
+        }
+    }
+
+    return on_request_index(r);
+}
+
+fn on_request_not_found(_: zap.SimpleRequest) !Response {
+    var body = ArrayList(u8).init(gpa.allocator());
+    var stream = StringWriter{ .context = &body };
+    try stream.print("Not Found", .{});
+    return .{ .status_code = .not_found, .content_type = .TEXT, .body = body };
+}
+
+fn on_request_index(_: zap.SimpleRequest) !Response {
+    var body = ArrayList(u8).init(gpa.allocator());
+    var stream = StringWriter{ .context = &body };
+    try stream.print("{s}", .{@embedFile("html/index.html")});
+
+    return .{
+        .status_code = .ok,
+        .content_type = .HTML,
+        .body = body,
+    };
+}
+
+fn on_request_db(r: zap.SimpleRequest) !Response {
     if (r.path) |the_path| {
         std.debug.print("PATH: {s}\n", .{the_path});
     }
@@ -143,6 +180,7 @@ pub fn main() !void {
     );
 
     var listener = zap.SimpleHttpListener.init(.{
+        .interface = "127.0.0.1",
         .port = 3000,
         .on_request = on_request_verbose,
         .log = true,
